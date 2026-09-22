@@ -257,3 +257,23 @@ void setup() {
 ```
 
 The compatibility path `ui.begin(&hardware, false)` remains available for hardware that has already been initialized directly, but new code should prefer the high-level `NV3047_Driver` path.
+
+## External memory-manager boundary
+
+`NV3047_UI` does **not** include, initialize, register, service, or allocate through `NV3047_memorymanager` directly.
+
+If an application adds:
+
+```cpp
+#include <NV3047_Memory.h>
+```
+
+then `NV3047_drivers` detects the registered provider during its own framebuffer initialization. From the UI's point of view, the normal driver API remains unchanged:
+
+- drawing still goes through `NV3047_Driver` / `Framebuffer`,
+- frame presentation still goes through `present()`,
+- touch still comes from the driver,
+- framebuffer diagnostics still come from `MemoryManager`,
+- buffer ownership and DMA scratch ownership remain entirely below the UI layer.
+
+This means the same NV3047_UI code works in both local-driver-memory mode and external-memory-manager takeover mode. The UI must not create a second framebuffer allocator or call `AutoMemory::begin()`, `service()`, `beginFrame()`, provider registration, or memory configuration APIs.
