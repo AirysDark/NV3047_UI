@@ -1,0 +1,44 @@
+name: ESP32 Core 2.0.17 Compile
+
+on:
+  push:
+    branches:
+      - main
+      - ui-overhaul-v2
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout NV3047_UI
+        uses: actions/checkout@v4
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+        with:
+          version: "1.x"
+
+      - name: Install ESP32 Arduino Core 2.0.17
+        run: |
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@2.0.17 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+      - name: Install NV3047 driver_overhaul_v2 library
+        run: |
+          mkdir -p "$HOME/Arduino/libraries"
+          git clone --depth 1 --branch driver_overhaul_v2 --single-branch https://github.com/AirysDark/NV3047_drivers.git "$HOME/Arduino/libraries/NV3047"
+
+      - name: Link NV3047_UI library
+        run: |
+          ln -s "$GITHUB_WORKSPACE" "$HOME/Arduino/libraries/NV3047_UI"
+
+      - name: Compile DashboardDemo for ESP32-S3
+        run: |
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32s3 \
+            --libraries "$HOME/Arduino/libraries" \
+            examples/DashboardDemo
