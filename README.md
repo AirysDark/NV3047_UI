@@ -1,5 +1,7 @@
 # NV3047_UI 2.0
 
+> **Driver overhaul in progress:** `NV3047_drivers` is currently being overhauled and optimized. NV3047_UI is being kept aligned with the existing Core 2.0.17 stack and will be tuned further for the upcoming driver update. Stay tuned for the next driver-side update.
+
 A lightweight native UI toolkit for the **NV3047 / Elecrow 4.3-inch 480x272 ESP32-S3 display stack**.
 
 `NV3047_drivers` stays responsible for the hardware, RGB bus, XPT2046 touch input and double-buffered framebuffer. `NV3047_UI` now sits above that layer and provides reusable screens and controls instead of requiring every application to manually draw rectangles and poll touch coordinates.
