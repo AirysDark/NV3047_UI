@@ -1,6 +1,7 @@
 #pragma once
+#include <stddef.h>
 #include <stdint.h>
-#include <NV3047.h>
+#include <NV3047_Driver.h>
 
 struct UIRect {
     int16_t x, y, w, h;
@@ -9,8 +10,15 @@ struct UIRect {
 };
 
 namespace UIColor {
+    // Logical RGB -> the verified physical colour-bank order used by NV3047_drivers.
+    constexpr uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) {
+        return Config::packPanelColor(r, g, b);
+    }
+
+    // Kept for source compatibility. On this panel this is intentionally
+    // panel-aware rather than textbook RGB565 packing.
     constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
-        return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+        return rgb(r, g, b);
     }
 }
 
@@ -27,7 +35,7 @@ class DisplayDriverInterface {
 public:
     virtual ~DisplayDriverInterface() = default;
     virtual void clear(uint16_t color) = 0;
-    virtual void commit() = 0;
+    virtual bool commit() = 0;
     virtual void drawPixel(int16_t x, int16_t y, uint16_t color) = 0;
     virtual void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color) = 0;
     virtual void drawHLine(int16_t x, int16_t y, int16_t w, uint16_t color) = 0;
@@ -37,16 +45,42 @@ public:
     virtual bool getTouch(uint16_t& x, uint16_t& y) = 0;
     virtual uint16_t width() const { return 480; }
     virtual uint16_t height() const { return 272; }
+
+    // Optional native-driver diagnostics. Custom display adapters can leave
+    // these at their zero defaults.
+    virtual uint32_t frameCount() const { return 0; }
+    virtual uint32_t lastFrameTimeUs() const { return 0; }
+    virtual float presentationFPS() const { return 0.0f; }
+    virtual size_t framebufferCount() const { return 0; }
+    virtual size_t framebufferSizeBytes() const { return 0; }
+    virtual size_t framebufferAllocatedBytes() const { return 0; }
+    virtual size_t freeManagedMemoryBytes() const { return 0; }
+    virtual size_t largestFreeManagedMemoryBlockBytes() const { return 0; }
 };
 
 class NV3047_Adapter : public DisplayDriverInterface {
-    NV3047* hardware;
+    NV3047_Driver ownedDriver;
+    NV3047_Driver* highLevelDriver;
+    NV3047* rawHardware;
+
+    Framebuffer* canvas();
+    const Framebuffer* canvas() const;
+
 public:
     NV3047_Adapter();
+
+    // Preferred path: uses the v2 high-level driver and its error propagation.
     bool begin(NV3047* hw, bool initializeHardware=true);
-    void setBrightness(uint8_t brightness);
+
+    // Attach to an already initialized NV3047_Driver.
+    bool begin(NV3047_Driver* readyDriver);
+
+    void setBrightness(uint8_t percentage);
+    void sleep();
+    void wake();
+
     void clear(uint16_t color) override;
-    void commit() override;
+    bool commit() override;
     void drawPixel(int16_t x, int16_t y, uint16_t color) override;
     void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color) override;
     void drawHLine(int16_t x, int16_t y, int16_t w, uint16_t color) override;
@@ -56,6 +90,15 @@ public:
     bool getTouch(uint16_t& x, uint16_t& y) override;
     uint16_t width() const override;
     uint16_t height() const override;
+
+    uint32_t frameCount() const override;
+    uint32_t lastFrameTimeUs() const override;
+    float presentationFPS() const override;
+    size_t framebufferCount() const override;
+    size_t framebufferSizeBytes() const override;
+    size_t framebufferAllocatedBytes() const override;
+    size_t freeManagedMemoryBytes() const override;
+    size_t largestFreeManagedMemoryBlockBytes() const override;
 };
 
 class TextRenderer {
@@ -218,6 +261,17 @@ public:
     void render(UIContext& ctx);
 };
 
+struct UIDriverStats {
+    uint32_t frameCount;
+    uint32_t lastFrameTimeUs;
+    float presentationFPS;
+    size_t framebufferCount;
+    size_t framebufferSizeBytes;
+    size_t framebufferAllocatedBytes;
+    size_t freeManagedMemoryBytes;
+    size_t largestFreeManagedMemoryBlockBytes;
+};
+
 class NV3047_UI {
     DisplayDriverInterface* display;
     NV3047_Adapter nvAdapter;
@@ -228,26 +282,33 @@ class NV3047_UI {
     uint32_t frameCounter;
     uint32_t fpsWindowStart;
     uint16_t measuredFps;
+    bool lastPresentOK;
     bool wasTouched;
     uint16_t lastTouchX, lastTouchY;
 public:
     NV3047_UI();
     bool begin(DisplayDriverInterface* driver);
     bool begin(NV3047* hardware, bool initializeHardware=true);
+    bool begin(NV3047_Driver* driver);
     void loadScreen(Screen* screen);
     Screen* getActiveScreen() const;
     void setTheme(const UITheme& theme);
     const UITheme& theme() const;
     void setBackgroundColor(uint16_t color);
-    void setBrightness(uint8_t brightness);
+    void setBrightness(uint8_t percentage);
+    void sleep();
+    void wake();
     uint16_t width() const;
     uint16_t height() const;
     uint32_t getIdleTimeMs() const;
     uint16_t getFPS() const;
+    float getPresentationFPS() const;
+    bool getDriverStats(UIDriverStats& stats) const;
+    bool lastPresentSucceeded() const;
     TextRenderer& text();
     DisplayDriverInterface* driver();
     void drawText(const char* value, int16_t x, int16_t y, uint16_t color, uint8_t scale=1);
-    void update();
+    bool update();
 };
 
 #include "NV3047_UI_Extras.h"

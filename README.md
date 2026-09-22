@@ -1,6 +1,6 @@
-# NV3047_UI 2.0
+# NV3047_UI 2.2
 
-> **Driver overhaul in progress:** `NV3047_drivers` is currently being overhauled and optimized. NV3047_UI is being kept aligned with the existing Core 2.0.17 stack and will be tuned further for the upcoming driver update. Stay tuned for the next driver-side update.
+> **Driver-overhaul alignment:** this branch is tuned against `NV3047_drivers:driver_overhaul_v2` for Arduino-ESP32 Core **2.0.17**. It uses the driver's verified panel colour packing, 0-100% brightness contract, explicit frame presentation result, framebuffer cadence, touch mapping and MemoryManager diagnostics.
 
 A lightweight native UI toolkit for the **NV3047 / Elecrow 4.3-inch 480x272 ESP32-S3 display stack**.
 
@@ -76,7 +76,7 @@ void setup() {
     }
 
     ui.setTheme(UITheme::dark());
-    ui.setBrightness(200);
+    ui.setBrightness(80);
     ui.loadScreen(&home);
 }
 
@@ -106,10 +106,10 @@ ui.setTheme(UITheme::dark());
 ui.setTheme(UITheme::light());
 ```
 
-Custom themes are plain `UITheme` structs. Colors use RGB565. You can create colors with:
+Custom themes are plain `UITheme` structs. Logical RGB colours must follow the panel's verified non-standard physical colour-bank order. `UIColor::rgb()` and the compatibility alias `UIColor::rgb565()` now call `Config::packPanelColor()`, so normal RGB values render correctly on the overhauled driver. Create colours with:
 
 ```cpp
-uint16_t orange = UIColor::rgb565(255, 120, 20);
+uint16_t orange = UIColor::rgb(255, 120, 20);
 ```
 
 ## Included example
@@ -199,8 +199,61 @@ add(warning, 100);
 warning.show();
 ```
 
-### FPS measurement
+### Frame presentation and diagnostics
 
-`ui.getFPS()` returns the measured UI frame rate. This does not replace or alter the NV3047 driver's existing framebuffer cadence logic.
+`ui.update()` now returns `bool`, propagating the overhauled driver's `present()` / framebuffer `swap()` result. Existing code may still simply call `ui.update();`.
+
+`ui.getFPS()` returns the UI loop's measured frame rate. `ui.getPresentationFPS()` returns the driver's framebuffer presentation FPS.
+
+The driver's MemoryManager and frame timing information is also available without bypassing the UI:
+
+```cpp
+UIDriverStats stats;
+if (ui.getDriverStats(stats)) {
+    Serial.println(stats.frameCount);
+    Serial.println(stats.lastFrameTimeUs);
+    Serial.println(stats.presentationFPS);
+    Serial.println(stats.framebufferAllocatedBytes);
+    Serial.println(stats.freeManagedMemoryBytes);
+}
+```
+
+The UI does not add its own pacing delay. Presentation cadence remains owned by `NV3047_drivers` through `Config::Framebuffer::FRAME_CADENCE_US`.
 
 The expanded `DashboardDemo` demonstrates the gauge, value cards, status badge, progress bar, tabs, action button and modal dialog.
+
+
+## NV3047 driver_overhaul_v2 alignment
+
+Version 2.2 is specifically tuned for the driver overhaul branch.
+
+- **Colour:** UI logical RGB is packed through `Config::packPanelColor()`. This preserves the panel's verified red / physical-blue / physical-green bank arrangement instead of assuming textbook RGB565.
+- **Brightness:** `ui.setBrightness()` is now explicitly **0-100 percent**, matching `NV3047_Driver::setBrightness()`.
+- **Presentation:** `ui.update()` returns the result of the driver's explicit `present()` path.
+- **Framebuffer timing:** the UI relies on the driver's tuned `16546 us` default cadence and does not introduce a competing delay.
+- **Memory:** `UIDriverStats` exposes the driver's MemoryManager buffer count, buffer size, allocated bytes, free managed memory and largest free managed block.
+- **Touch:** UI input consumes the overhauled median-filtered, clamped mapped coordinates from the driver. No second coordinate transform is applied in the UI.
+- **Power:** `ui.sleep()` and `ui.wake()` route to the driver's display power/backlight controls.
+- **High-level driver:** applications may either use `ui.begin(&hardware)` or initialize `NV3047_Driver` themselves and attach it with `ui.begin(&displayDriver)`.
+
+Preferred explicit-driver setup:
+
+```cpp
+NV3047 hardware;
+NV3047_Driver displayDriver;
+NV3047_UI ui;
+
+void setup() {
+    if (!displayDriver.begin(&hardware)) {
+        while (true) delay(1000);
+    }
+
+    if (!ui.begin(&displayDriver)) {
+        while (true) delay(1000);
+    }
+
+    ui.setBrightness(80);
+}
+```
+
+The compatibility path `ui.begin(&hardware, false)` remains available for hardware that has already been initialized directly, but new code should prefer the high-level `NV3047_Driver` path.

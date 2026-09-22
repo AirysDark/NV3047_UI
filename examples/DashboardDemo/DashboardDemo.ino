@@ -92,10 +92,13 @@ void setup() {
         while (true) delay(1000);
     }
     ui.setTheme(UITheme::dark());
-    ui.setBrightness(200);
+    ui.setBrightness(80);
     ui.loadScreen(&dashboard);
 }
 
 void loop() {
-    ui.update();
+    if (!ui.update()) {
+        Serial.println("NV3047 frame presentation failed");
+        delay(10);
+    }
 }

@@ -27,10 +27,10 @@ jobs:
           arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli core install esp32:esp32@2.0.17 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
 
-      - name: Install NV3047 driver library
+      - name: Install NV3047 driver_overhaul_v2 library
         run: |
           mkdir -p "$HOME/Arduino/libraries"
-          git clone --depth 1 https://github.com/AirysDark/NV3047_drivers.git "$HOME/Arduino/libraries/NV3047"
+          git clone --depth 1 --branch driver_overhaul_v2 --single-branch https://github.com/AirysDark/NV3047_drivers.git "$HOME/Arduino/libraries/NV3047"
 
       - name: Link NV3047_UI library
         run: |

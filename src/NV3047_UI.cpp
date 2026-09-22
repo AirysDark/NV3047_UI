@@ -24,10 +24,130 @@ static const Glyph* glyphFor(char c) {
 UITheme UITheme::dark(){return {UIColor::rgb565(12,16,24),UIColor::rgb565(24,30,42),UIColor::rgb565(35,43,58),UIColor::rgb565(64,75,94),UIColor::rgb565(0,170,255),UIColor::rgb565(0,125,205),UIColor::rgb565(245,248,252),UIColor::rgb565(150,161,179),UIColor::rgb565(44,201,128),UIColor::rgb565(255,184,77),UIColor::rgb565(245,80,92),UIColor::rgb565(5,8,13)};}
 UITheme UITheme::light(){return {UIColor::rgb565(238,242,247),UIColor::rgb565(255,255,255),UIColor::rgb565(224,231,239),UIColor::rgb565(190,201,214),UIColor::rgb565(0,122,204),UIColor::rgb565(0,92,160),UIColor::rgb565(25,31,40),UIColor::rgb565(94,106,122),UIColor::rgb565(27,158,99),UIColor::rgb565(215,139,23),UIColor::rgb565(210,58,68),UIColor::rgb565(190,197,207)};}
 
-NV3047_Adapter::NV3047_Adapter():hardware(nullptr){}
-bool NV3047_Adapter::begin(NV3047* hw,bool init){if(!hw)return false;hardware=hw;if(init&&!hardware->init()){hardware=nullptr;return false;}return true;}
-void NV3047_Adapter::setBrightness(uint8_t v){if(hardware)hardware->getDisplay().setBrightness(v);} void NV3047_Adapter::clear(uint16_t c){if(hardware)hardware->getCanvas().clear(c);} void NV3047_Adapter::commit(){if(hardware)hardware->getCanvas().swap();}
-void NV3047_Adapter::drawPixel(int16_t x,int16_t y,uint16_t c){if(hardware)hardware->getCanvas().drawPixel(x,y,c);} void NV3047_Adapter::fillRect(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t c){if(hardware)hardware->getCanvas().fillRect(x,y,w,h,c);} void NV3047_Adapter::drawHLine(int16_t x,int16_t y,int16_t w,uint16_t c){if(hardware)hardware->getCanvas().drawHLine(x,y,w,c);} void NV3047_Adapter::drawVLine(int16_t x,int16_t y,int16_t h,uint16_t c){if(hardware)hardware->getCanvas().drawVLine(x,y,h,c);} void NV3047_Adapter::drawRect(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t c){if(hardware)hardware->getCanvas().drawRect(x,y,w,h,c);} void NV3047_Adapter::drawBitmap(int16_t x,int16_t y,int16_t w,int16_t h,const uint16_t* b){if(hardware)hardware->getCanvas().drawBitmap(x,y,w,h,b);} bool NV3047_Adapter::getTouch(uint16_t&x,uint16_t&y){return hardware?hardware->getTouch().getTouch(x,y):false;} uint16_t NV3047_Adapter::width()const{return Config::SCREEN_WIDTH;} uint16_t NV3047_Adapter::height()const{return Config::SCREEN_HEIGHT;}
+NV3047_Adapter::NV3047_Adapter()
+    : highLevelDriver(nullptr), rawHardware(nullptr) {}
+
+Framebuffer* NV3047_Adapter::canvas() {
+    if (highLevelDriver) return highLevelDriver->getCanvas();
+    return rawHardware ? &rawHardware->getCanvas() : nullptr;
+}
+
+const Framebuffer* NV3047_Adapter::canvas() const {
+    if (highLevelDriver) return highLevelDriver->getCanvas();
+    return rawHardware ? &rawHardware->getCanvas() : nullptr;
+}
+
+bool NV3047_Adapter::begin(NV3047* hw, bool initializeHardware) {
+    highLevelDriver = nullptr;
+    rawHardware = nullptr;
+    if (!hw) return false;
+
+    if (initializeHardware) {
+        if (!ownedDriver.begin(hw)) return false;
+        highLevelDriver = &ownedDriver;
+    } else {
+        // Backward-compatible path for applications that already initialized
+        // NV3047 directly. The preferred v2 path is initializeHardware=true.
+        rawHardware = hw;
+        Framebuffer* fb = canvas();
+        if (!fb || !fb->isReady()) {
+            rawHardware = nullptr;
+            return false;
+        }
+    }
+    return true;
+}
+
+bool NV3047_Adapter::begin(NV3047_Driver* readyDriver) {
+    highLevelDriver = nullptr;
+    rawHardware = nullptr;
+    if (!readyDriver || !readyDriver->isReady()) return false;
+    highLevelDriver = readyDriver;
+    return true;
+}
+
+void NV3047_Adapter::setBrightness(uint8_t percentage) {
+    if (percentage > 100) percentage = 100;
+    if (highLevelDriver) highLevelDriver->setBrightness(percentage);
+    else if (rawHardware) rawHardware->getDisplay().setBrightness(percentage);
+}
+
+void NV3047_Adapter::sleep() {
+    if (highLevelDriver) highLevelDriver->sleep();
+    else if (rawHardware) rawHardware->getDisplay().sleep();
+}
+
+void NV3047_Adapter::wake() {
+    if (highLevelDriver) highLevelDriver->wake();
+    else if (rawHardware) rawHardware->getDisplay().wake();
+}
+
+void NV3047_Adapter::clear(uint16_t color) {
+    if (highLevelDriver) highLevelDriver->clear(color);
+    else { Framebuffer* fb = canvas(); if (fb) fb->clear(color); }
+}
+
+bool NV3047_Adapter::commit() {
+    if (highLevelDriver) return highLevelDriver->present();
+    Framebuffer* fb = canvas();
+    return fb && fb->swap();
+}
+
+void NV3047_Adapter::drawPixel(int16_t x,int16_t y,uint16_t c) {
+    if (highLevelDriver) highLevelDriver->drawPixel(x,y,c);
+    else { Framebuffer* fb=canvas(); if(fb) fb->drawPixel(x,y,c); }
+}
+void NV3047_Adapter::fillRect(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t c) {
+    if (highLevelDriver) highLevelDriver->fillRect(x,y,w,h,c);
+    else { Framebuffer* fb=canvas(); if(fb) fb->fillRect(x,y,w,h,c); }
+}
+void NV3047_Adapter::drawHLine(int16_t x,int16_t y,int16_t w,uint16_t c) {
+    if (highLevelDriver) highLevelDriver->drawHLine(x,y,w,c);
+    else { Framebuffer* fb=canvas(); if(fb) fb->drawHLine(x,y,w,c); }
+}
+void NV3047_Adapter::drawVLine(int16_t x,int16_t y,int16_t hh,uint16_t c) {
+    if (highLevelDriver) highLevelDriver->drawVLine(x,y,hh,c);
+    else { Framebuffer* fb=canvas(); if(fb) fb->drawVLine(x,y,hh,c); }
+}
+void NV3047_Adapter::drawRect(int16_t x,int16_t y,int16_t w,int16_t hh,uint16_t c) {
+    if (highLevelDriver) highLevelDriver->drawRect(x,y,w,hh,c);
+    else { Framebuffer* fb=canvas(); if(fb) fb->drawRect(x,y,w,hh,c); }
+}
+void NV3047_Adapter::drawBitmap(int16_t x,int16_t y,int16_t w,int16_t hh,const uint16_t* b) {
+    if (highLevelDriver) highLevelDriver->pushPixels(x,y,w,hh,b);
+    else { Framebuffer* fb=canvas(); if(fb) fb->drawBitmap(x,y,w,hh,b); }
+}
+bool NV3047_Adapter::getTouch(uint16_t& x,uint16_t& y) {
+    if (highLevelDriver) return highLevelDriver->getTouch(x,y);
+    return rawHardware ? rawHardware->getTouch().getTouch(x,y) : false;
+}
+uint16_t NV3047_Adapter::width() const { return Config::SCREEN_WIDTH; }
+uint16_t NV3047_Adapter::height() const { return Config::SCREEN_HEIGHT; }
+
+uint32_t NV3047_Adapter::frameCount() const {
+    const Framebuffer* fb=canvas(); return fb?fb->getFrameCount():0;
+}
+uint32_t NV3047_Adapter::lastFrameTimeUs() const {
+    const Framebuffer* fb=canvas(); return fb?fb->getLastFrameTimeUs():0;
+}
+float NV3047_Adapter::presentationFPS() const {
+    const Framebuffer* fb=canvas(); return fb?fb->getApproxFPS():0.0f;
+}
+size_t NV3047_Adapter::framebufferCount() const {
+    const Framebuffer* fb=canvas(); return fb?fb->getMemoryManager().getBufferCount():0;
+}
+size_t NV3047_Adapter::framebufferSizeBytes() const {
+    const Framebuffer* fb=canvas(); return fb?fb->getMemoryManager().getBufferSizeBytes():0;
+}
+size_t NV3047_Adapter::framebufferAllocatedBytes() const {
+    const Framebuffer* fb=canvas(); return fb?fb->getMemoryManager().getTotalAllocatedBytes():0;
+}
+size_t NV3047_Adapter::freeManagedMemoryBytes() const {
+    const Framebuffer* fb=canvas(); return fb?fb->getMemoryManager().getFreeManagedMemoryBytes():0;
+}
+size_t NV3047_Adapter::largestFreeManagedMemoryBlockBytes() const {
+    const Framebuffer* fb=canvas(); return fb?fb->getMemoryManager().getLargestFreeManagedMemoryBlockBytes():0;
+}
 
 TextRenderer::TextRenderer():display(nullptr){} void TextRenderer::begin(DisplayDriverInterface* d){display=d;} int16_t TextRenderer::textHeight(uint8_t s)const{return 7*(s?s:1);} int16_t TextRenderer::textWidth(const char*t,uint8_t s)const{if(!t||!s)return 0;int16_t line=0,max=0;while(*t){if(*t=='\n'){if(line>max)max=line;line=0;}else line+=glyphFor(*t)->advance*s;++t;}if(line>max)max=line;return max?max-s:0;}
 void TextRenderer::drawText(const char*t,int16_t x,int16_t y,uint16_t c,uint8_t s){if(!display||!t||!s)return;int16_t sx=x;while(*t){if(*t=='\n'){x=sx;y+=8*s;++t;continue;}const Glyph*g=glyphFor(*t);for(uint8_t col=0;col<g->width;col++){uint8_t bits=g->bitmap[col];for(uint8_t row=0;row<g->height;row++)if(bits&(1U<<row)){if(s==1)display->drawPixel(x+col,y+row,c);else display->fillRect(x+col*s,y+row*s,s,s,c);}}x+=g->advance*s;++t;}}
@@ -56,5 +176,113 @@ void Slider::render(UIContext&ctx){if(!visible||!ctx.display||!ctx.text||!ctx.th
 Screen::Screen():widgetCount(0),focusedWidget(nullptr),initialized(false){for(uint8_t i=0;i<MAX_WIDGETS;i++){widgets[i].widget=nullptr;widgets[i].z=0;}} bool Screen::add(Widget&w,uint8_t z){return registerWidget(&w,z);} bool Screen::registerWidget(Widget*w,uint8_t z){if(!w||widgetCount>=MAX_WIDGETS)return false;uint8_t at=widgetCount;for(uint8_t i=0;i<widgetCount;i++)if(widgets[i].z>z){at=i;break;}for(uint8_t i=widgetCount;i>at;i--)widgets[i]=widgets[i-1];widgets[at]={w,z};widgetCount++;return true;} bool Screen::remove(Widget&w){return unregisterWidget(&w);} bool Screen::unregisterWidget(Widget*w){if(!w)return false;for(uint8_t i=0;i<widgetCount;i++)if(widgets[i].widget==w){if(focusedWidget==w)focusedWidget=nullptr;for(uint8_t j=i;j+1<widgetCount;j++)widgets[j]=widgets[j+1];widgetCount--;widgets[widgetCount].widget=nullptr;return true;}return false;} void Screen::clearWidgets(){widgetCount=0;focusedWidget=nullptr;} void Screen::focus(){if(!initialized){onInit();initialized=true;}onEnter();} void Screen::defocus(){focusedWidget=nullptr;onExit();}
 void Screen::handleInput(uint16_t x,uint16_t y){if(focusedWidget){focusedWidget->onTouchMove(x,y);return;}for(int i=(int)widgetCount-1;i>=0;i--){Widget*w=widgets[i].widget;if(w&&w->hitTest(x,y)){focusedWidget=w;w->onTouchDown(x,y);break;}}} void Screen::releaseInput(uint16_t x,uint16_t y){if(!focusedWidget)return;Widget*w=focusedWidget;focusedWidget=nullptr;w->onTouchUp(x,y,w->hitTest(x,y));} void Screen::processInput(uint16_t x,uint16_t y,bool t){if(t)handleInput(x,y);else releaseInput(x,y);} void Screen::render(UIContext&ctx){onDraw(ctx);for(uint8_t i=0;i<widgetCount;i++)if(widgets[i].widget&&widgets[i].widget->isVisible())widgets[i].widget->render(ctx);}
 
-NV3047_UI::NV3047_UI():display(nullptr),activeScreen(nullptr),activeTheme(UITheme::dark()),lastInteractionTime(0),frameCounter(0),fpsWindowStart(0),measuredFps(0),wasTouched(false),lastTouchX(0),lastTouchY(0){} bool NV3047_UI::begin(DisplayDriverInterface*d){if(!d)return false;display=d;textRenderer.begin(d);uint32_t now=millis();lastInteractionTime=now;fpsWindowStart=now;frameCounter=0;measuredFps=0;wasTouched=false;return true;} bool NV3047_UI::begin(NV3047*h,bool init){if(!nvAdapter.begin(h,init))return false;return begin((DisplayDriverInterface*)&nvAdapter);} void NV3047_UI::loadScreen(Screen*s){if(activeScreen==s)return;if(activeScreen)activeScreen->defocus();activeScreen=s;if(activeScreen)activeScreen->focus();} Screen* NV3047_UI::getActiveScreen()const{return activeScreen;} void NV3047_UI::setTheme(const UITheme&t){activeTheme=t;} const UITheme& NV3047_UI::theme()const{return activeTheme;} void NV3047_UI::setBackgroundColor(uint16_t c){activeTheme.background=c;} void NV3047_UI::setBrightness(uint8_t b){if(display==&nvAdapter)nvAdapter.setBrightness(b);} uint16_t NV3047_UI::width()const{return display?display->width():0;} uint16_t NV3047_UI::height()const{return display?display->height():0;} uint32_t NV3047_UI::getIdleTimeMs()const{return millis()-lastInteractionTime;} uint16_t NV3047_UI::getFPS()const{return measuredFps;} TextRenderer& NV3047_UI::text(){return textRenderer;} DisplayDriverInterface* NV3047_UI::driver(){return display;} void NV3047_UI::drawText(const char*v,int16_t x,int16_t y,uint16_t c,uint8_t s){textRenderer.drawText(v,x,y,c,s);}
-void NV3047_UI::update(){if(!display)return;uint16_t x=lastTouchX,y=lastTouchY;bool touched=display->getTouch(x,y);if(activeScreen){if(touched){activeScreen->handleInput(x,y);lastInteractionTime=millis();lastTouchX=x;lastTouchY=y;}else if(wasTouched){activeScreen->releaseInput(lastTouchX,lastTouchY);lastInteractionTime=millis();}}display->clear(activeTheme.background);if(activeScreen){UIContext ctx={display,&textRenderer,&activeTheme};activeScreen->render(ctx);}display->commit();wasTouched=touched;frameCounter++;uint32_t now=millis();uint32_t elapsed=now-fpsWindowStart;if(elapsed>=1000){measuredFps=(uint16_t)((frameCounter*1000UL)/elapsed);frameCounter=0;fpsWindowStart=now;}}
+NV3047_UI::NV3047_UI()
+    : display(nullptr), activeScreen(nullptr), activeTheme(UITheme::dark()),
+      lastInteractionTime(0), frameCounter(0), fpsWindowStart(0),
+      measuredFps(0), lastPresentOK(false), wasTouched(false),
+      lastTouchX(0), lastTouchY(0) {}
+
+bool NV3047_UI::begin(DisplayDriverInterface* d) {
+    if (!d) return false;
+    display=d;
+    textRenderer.begin(d);
+    uint32_t now=millis();
+    lastInteractionTime=now;
+    fpsWindowStart=now;
+    frameCounter=0;
+    measuredFps=0;
+    lastPresentOK=true;
+    wasTouched=false;
+    return true;
+}
+
+bool NV3047_UI::begin(NV3047* h,bool init) {
+    if(!nvAdapter.begin(h,init)) return false;
+    return begin(static_cast<DisplayDriverInterface*>(&nvAdapter));
+}
+
+bool NV3047_UI::begin(NV3047_Driver* d) {
+    if(!nvAdapter.begin(d)) return false;
+    return begin(static_cast<DisplayDriverInterface*>(&nvAdapter));
+}
+
+void NV3047_UI::loadScreen(Screen* s) {
+    if(activeScreen==s) return;
+    if(activeScreen) activeScreen->defocus();
+    activeScreen=s;
+    if(activeScreen) activeScreen->focus();
+}
+Screen* NV3047_UI::getActiveScreen()const{return activeScreen;}
+void NV3047_UI::setTheme(const UITheme&t){activeTheme=t;}
+const UITheme& NV3047_UI::theme()const{return activeTheme;}
+void NV3047_UI::setBackgroundColor(uint16_t c){activeTheme.background=c;}
+
+void NV3047_UI::setBrightness(uint8_t percentage) {
+    if(percentage>100) percentage=100;
+    if(display==&nvAdapter) nvAdapter.setBrightness(percentage);
+}
+void NV3047_UI::sleep(){if(display==&nvAdapter)nvAdapter.sleep();}
+void NV3047_UI::wake(){if(display==&nvAdapter)nvAdapter.wake();}
+
+uint16_t NV3047_UI::width()const{return display?display->width():0;}
+uint16_t NV3047_UI::height()const{return display?display->height():0;}
+uint32_t NV3047_UI::getIdleTimeMs()const{return millis()-lastInteractionTime;}
+uint16_t NV3047_UI::getFPS()const{return measuredFps;}
+float NV3047_UI::getPresentationFPS()const{return display?display->presentationFPS():0.0f;}
+
+bool NV3047_UI::getDriverStats(UIDriverStats& stats) const {
+    if(!display) return false;
+    stats.frameCount=display->frameCount();
+    stats.lastFrameTimeUs=display->lastFrameTimeUs();
+    stats.presentationFPS=display->presentationFPS();
+    stats.framebufferCount=display->framebufferCount();
+    stats.framebufferSizeBytes=display->framebufferSizeBytes();
+    stats.framebufferAllocatedBytes=display->framebufferAllocatedBytes();
+    stats.freeManagedMemoryBytes=display->freeManagedMemoryBytes();
+    stats.largestFreeManagedMemoryBlockBytes=display->largestFreeManagedMemoryBlockBytes();
+    return true;
+}
+
+bool NV3047_UI::lastPresentSucceeded()const{return lastPresentOK;}
+TextRenderer& NV3047_UI::text(){return textRenderer;}
+DisplayDriverInterface* NV3047_UI::driver(){return display;}
+void NV3047_UI::drawText(const char*v,int16_t x,int16_t y,uint16_t c,uint8_t s){textRenderer.drawText(v,x,y,c,s);}
+
+bool NV3047_UI::update() {
+    if(!display){lastPresentOK=false;return false;}
+
+    uint16_t x=lastTouchX,y=lastTouchY;
+    bool touched=display->getTouch(x,y);
+    if(activeScreen){
+        if(touched){
+            activeScreen->handleInput(x,y);
+            lastInteractionTime=millis();
+            lastTouchX=x;
+            lastTouchY=y;
+        } else if(wasTouched){
+            activeScreen->releaseInput(lastTouchX,lastTouchY);
+            lastInteractionTime=millis();
+        }
+    }
+
+    display->clear(activeTheme.background);
+    if(activeScreen){
+        UIContext ctx={display,&textRenderer,&activeTheme};
+        activeScreen->render(ctx);
+    }
+
+    lastPresentOK=display->commit();
+    wasTouched=touched;
+
+    frameCounter++;
+    uint32_t now=millis();
+    uint32_t elapsed=now-fpsWindowStart;
+    if(elapsed>=1000){
+        measuredFps=(uint16_t)((frameCounter*1000UL)/elapsed);
+        frameCounter=0;
+        fpsWindowStart=now;
+    }
+
+    return lastPresentOK;
+}
+
