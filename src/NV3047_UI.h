@@ -191,12 +191,13 @@ public:
 
 class Screen {
 public:
-    static const uint8_t MAX_WIDGETS = 32;
+    static const uint8_t MAX_WIDGETS = 40;
 private:
     struct WidgetSlot { Widget* widget; uint8_t z; };
     WidgetSlot widgets[MAX_WIDGETS];
     uint8_t widgetCount;
     Widget* focusedWidget;
+    bool initialized;
 public:
     Screen();
     virtual ~Screen() = default;
@@ -224,6 +225,9 @@ class NV3047_UI {
     TextRenderer textRenderer;
     UITheme activeTheme;
     uint32_t lastInteractionTime;
+    uint32_t frameCounter;
+    uint32_t fpsWindowStart;
+    uint16_t measuredFps;
     bool wasTouched;
     uint16_t lastTouchX, lastTouchY;
 public:
@@ -239,8 +243,11 @@ public:
     uint16_t width() const;
     uint16_t height() const;
     uint32_t getIdleTimeMs() const;
+    uint16_t getFPS() const;
     TextRenderer& text();
     DisplayDriverInterface* driver();
     void drawText(const char* value, int16_t x, int16_t y, uint16_t color, uint8_t scale=1);
     void update();
 };
+
+#include "NV3047_UI_Extras.h"
